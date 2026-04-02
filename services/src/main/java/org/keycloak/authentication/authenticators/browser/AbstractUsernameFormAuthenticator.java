@@ -200,13 +200,24 @@ public abstract class AbstractUsernameFormAuthenticator extends AbstractFormAuth
         if (!enabledUser(context, user)) {
             return false;
         }
-        String rememberMe = inputData.getFirst("rememberMe");
-        boolean remember = context.getRealm().isRememberMe() && rememberMe != null && rememberMe.equalsIgnoreCase("on");
-        if (remember) {
-            context.getAuthenticationSession().setAuthNote(Details.REMEMBER_ME, "true");
-            context.getEvent().detail(Details.REMEMBER_ME, "true");
+        AuthenticationSessionModel authenticationSession = context.getAuthenticationSession();
+        if (Boolean.parseBoolean(authenticationSession.getAuthNote(USERNAME_HIDDEN))) {
+            // In an identity-first flow (e.g. with organization scope), the username step is handled
+            // by a preceding authenticator which also captures rememberMe and stores it as an auth
+            // note. Since this request only carries the password, there is no rememberMe field here;
+            // skip the rememberMe update so we do not inadvertently clear what was already set.
+            if ("true".equals(authenticationSession.getAuthNote(Details.REMEMBER_ME))) {
+                context.getEvent().detail(Details.REMEMBER_ME, "true");
+            }
         } else {
-            context.getAuthenticationSession().removeAuthNote(Details.REMEMBER_ME);
+            String rememberMe = inputData.getFirst("rememberMe");
+            boolean remember = context.getRealm().isRememberMe() && rememberMe != null && rememberMe.equalsIgnoreCase("on");
+            if (remember) {
+                authenticationSession.setAuthNote(Details.REMEMBER_ME, "true");
+                context.getEvent().detail(Details.REMEMBER_ME, "true");
+            } else {
+                authenticationSession.removeAuthNote(Details.REMEMBER_ME);
+            }
         }
         context.setUser(user);
         return true;

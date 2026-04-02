@@ -25,14 +25,17 @@ import java.nio.charset.StandardCharsets;
 import jakarta.ws.rs.core.Response;
 
 import org.keycloak.admin.client.resource.OrganizationResource;
+import org.keycloak.events.Details;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel.RequiredAction;
 import org.keycloak.models.utils.DefaultAuthenticationFlows;
 import org.keycloak.organization.authentication.authenticators.browser.OrganizationAuthenticatorFactory;
+import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.OrganizationRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.Assert;
+import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.organization.admin.AbstractOrganizationTest;
 import org.keycloak.testsuite.runonserver.RunOnServer;
@@ -42,6 +45,7 @@ import org.keycloak.testsuite.util.UserBuilder;
 
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
+import org.junit.Rule;
 import org.junit.Test;
 
 import static org.keycloak.testsuite.broker.BrokerTestTools.waitForPage;
@@ -49,8 +53,13 @@ import static org.keycloak.testsuite.broker.BrokerTestTools.waitForPage;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class OrganizationAuthenticationTest extends AbstractOrganizationTest {
+
+    @Rule
+    public AssertEvents events = new AssertEvents(this);
 
     @Test
     public void testAuthenticateUnmanagedMember() {
@@ -397,6 +406,66 @@ public class OrganizationAuthenticationTest extends AbstractOrganizationTest {
         
         // Clean up
         testRealm().users().get(memberId).remove();
+    }
+
+    /**
+     * Regression test for https://github.com/keycloak/keycloak/issues/47017
+     * <p>
+     * When the organization scope is active, the authentication flow uses an identity-first pattern:
+     * the first step (OrganizationAuthenticator) collects the username and the rememberMe checkbox,
+     * then a second step (AbstractUsernameFormAuthenticator) collects the password. Because the two
+     * steps run on separate HTTP requests, the rememberMe value from the first request must be
+     * preserved in the auth session so that the second step does not inadvertently clear it.
+     */
+    @Test
+    public void testRememberMeWithOrganizationScope() throws Exception {
+        RealmRepresentation rep = testRealm().toRepresentation();
+        rep.setRememberMe(true);
+        testRealm().update(rep);
+
+        try {
+            OrganizationResource organization = testRealm().organizations().get(createOrganization().getId());
+            UserRepresentation member = addMember(organization, "rememberme@testorg.org");
+
+            // Open the identity-first login page (username only)
+            oauth.clientId("broker-app");
+            loginPage.open(bc.consumerRealmName());
+            assertTrue(loginPage.isUsernameInputPresent());
+            assertFalse(loginPage.isPasswordInputPresent());
+
+            // Enter email and check rememberMe before submitting the username step
+            loginPage.setRememberMe(true);
+            assertTrue(loginPage.isRememberMeChecked());
+            loginPage.loginUsername(member.getEmail());
+
+            waitForPage(driver, "sign in to", true);
+
+            // Now on the password step — rememberMe should still be checked
+            assertTrue("rememberMe should still be checked on the password step", loginPage.isRememberMeChecked());
+
+            // Complete authentication with the password
+            loginPage.login(memberPassword);
+            appPage.assertCurrent();
+
+            // Verify the login event carries rememberMe=true
+            EventRepresentation loginEvent = events.expectLogin()
+                    .realm(bc.consumerRealmName())
+                    .detail(Details.REMEMBER_ME, "true")
+                    .assertEvent();
+
+            String sessionId = loginEvent.getSessionId();
+
+            // Expire the user session
+            testingClient.testing(bc.consumerRealmName()).removeUserSession(bc.consumerRealmName(), sessionId);
+
+            // After session expiry, opening login should show rememberMe pre-checked and email prefilled
+            loginPage.open(bc.consumerRealmName());
+            assertTrue("rememberMe should be pre-checked after session expiry", loginPage.isRememberMeChecked());
+            assertEquals(member.getEmail(), loginPage.getUsername());
+        } finally {
+            rep.setRememberMe(false);
+            testRealm().update(rep);
+        }
     }
 
     private void runOnServer(RunOnServer function) {

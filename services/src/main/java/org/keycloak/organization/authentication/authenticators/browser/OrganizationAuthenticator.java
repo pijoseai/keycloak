@@ -28,6 +28,7 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 
 import org.keycloak.WebAuthnConstants;
+import org.keycloak.events.Details;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.FlowStatus;
@@ -118,6 +119,17 @@ public class OrganizationAuthenticator extends IdentityProviderAuthenticator {
                 // if failure doing webauthn authentication return error; continue if success checking organizations
                 return;
             }
+        }
+
+        // Capture rememberMe from the current form submission. When the organization scope is active,
+        // this authenticator runs in the identity-first step (username + rememberMe). The subsequent
+        // password step is handled by AbstractUsernameFormAuthenticator, which only reads rememberMe
+        // from its own form POST and would otherwise clear the auth note. Persisting it here ensures
+        // remember-me is honoured across the multi-step flow.
+        String rememberMe = parameters.getFirst("rememberMe");
+        if (context.getRealm().isRememberMe() && "on".equalsIgnoreCase(rememberMe)) {
+            context.getAuthenticationSession().setAuthNote(Details.REMEMBER_ME, "true");
+            context.getEvent().detail(Details.REMEMBER_ME, "true");
         }
 
         UserModel user = context.getUser();
