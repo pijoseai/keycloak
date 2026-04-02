@@ -38,6 +38,10 @@ public interface PolicyProviderFactory<R extends AbstractPolicyRepresentation> e
         return false;
     }
 
+    default String getDescription() {
+        return null;
+    }
+
     PolicyProvider create(AuthorizationProvider authorization);
 
     R toRepresentation(Policy policy, AuthorizationProvider authorization);

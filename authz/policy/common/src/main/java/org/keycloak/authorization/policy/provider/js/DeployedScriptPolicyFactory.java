@@ -41,6 +41,11 @@ public final class DeployedScriptPolicyFactory extends JSPolicyProviderFactory {
     }
 
     @Override
+    public String getDescription() {
+        return metadata.getDescription();
+    }
+
+    @Override
     public String getId() {
         return metadata.getId();
     }
@@ -66,9 +71,7 @@ public final class DeployedScriptPolicyFactory extends JSPolicyProviderFactory {
 
         representation.setId(policy.getId());
         representation.setName(policy.getName());
-        if (policy.getDescription() == null) {
-            representation.setDescription(metadata.getDescription());
-        }
+        representation.setDescription(policy.getDescription() != null ? policy.getDescription() : metadata.getDescription());
         representation.setType(getId());
         representation.setCode(metadata.getCode());
 

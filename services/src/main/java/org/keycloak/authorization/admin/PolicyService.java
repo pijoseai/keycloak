@@ -331,6 +331,7 @@ public class PolicyService {
                             representation.setName(factory.getName());
                             representation.setGroup(factory.getGroup());
                             representation.setType(factory.getId());
+                            representation.setDescription(factory.getDescription());
 
                             return representation;
                         })

@@ -80,6 +80,10 @@ public class ScriptProviderDescriptor {
         addProvider(POLICIES, name, fileName, null);
     }
 
+    public void addPolicy(String name, String fileName, String description) {
+        addProvider(POLICIES, name, fileName, description);
+    }
+
     public void addMapper(String name, String fileName) {
         addProvider(MAPPERS, name, fileName, null);
     }

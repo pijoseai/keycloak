@@ -76,7 +76,7 @@ public class DeployedScriptPolicyTest extends AbstractAuthzTest {
     public static JavaArchive deploy() throws IOException {
         ScriptProviderDescriptor representation = new ScriptProviderDescriptor();
 
-        representation.addPolicy("Grant Policy", "policy-grant.js");
+        representation.addPolicy("Grant Policy", "policy-grant.js", "Grants access to any resource");
         representation.addPolicy("Deny Policy", "policy-deny.js");
 
         return ShrinkWrap.create(JavaArchive.class, SCRIPT_DEPLOYMENT_NAME)
@@ -132,7 +132,26 @@ public class DeployedScriptPolicyTest extends AbstractAuthzTest {
     }
 
     @Test
-    public void testCreatePermission() {
+    public void testDeployedPolicyDescriptionIsVisible() {
+        AuthorizationResource authorization = getAuthorizationResource();
+
+        // Description from metadata should be visible in the policy providers list (type selector UI)
+        authorization.policies().policyProviders().stream()
+                .filter(rep -> "script-policy-grant.js".equals(rep.getType()))
+                .findFirst()
+                .ifPresent(rep -> assertEquals("Grants access to any resource", rep.getDescription()));
+
+        // Create a policy and verify description is visible on the created policy
+        PolicyRepresentation grantPolicy = new PolicyRepresentation();
+        grantPolicy.setName("Grant Policy With Desc");
+        grantPolicy.setType("script-policy-grant.js");
+        authorization.policies().create(grantPolicy).close();
+
+        PolicyRepresentation created = authorization.policies().findByName("Grant Policy With Desc");
+        assertEquals("Grants access to any resource", created.getDescription());
+    }
+
+    @Test
         AuthorizationResource authorization = getAuthorizationResource();
         PolicyRepresentation grantPolicy = new PolicyRepresentation();
 
