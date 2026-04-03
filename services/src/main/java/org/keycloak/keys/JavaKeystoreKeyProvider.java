@@ -53,7 +53,6 @@ import org.keycloak.crypto.KeyUse;
 import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.jose.jwe.JWEConstants;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.vault.VaultTranscriber;
 
 /**
@@ -255,7 +254,7 @@ public class JavaKeystoreKeyProvider implements KeyProvider {
         keyWrapper.setProviderId(model.getId());
         keyWrapper.setProviderPriority(model.get("priority", 0l));
 
-        keyWrapper.setKid(model.get(Attributes.KID_KEY, KeycloakModelUtils.generateId()));
+        keyWrapper.setKid(model.get(Attributes.KID_KEY) != null ? model.get(Attributes.KID_KEY) : KeyUtils.createKeyId(secretKey));
         keyWrapper.setUse(use);
         keyWrapper.setType(KeyType.OCT);
         keyWrapper.setAlgorithm(algorithm);
