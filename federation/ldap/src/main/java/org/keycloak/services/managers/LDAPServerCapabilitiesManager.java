@@ -76,6 +76,11 @@ public class LDAPServerCapabilitiesManager {
                 if (checkLdapConnectionUrl(config, ldapConfig)
                         && config.getBindDn() != null && config.getBindDn().equalsIgnoreCase(ldapConfig.getBindDN())) {
                     bindCredential = ldapConfig.getBindCredential();
+                } else {
+                    // Do not reuse stored bind credential when the connection URL or bind DN differs.
+                    // This prevents accidental transmission of stored credentials to a new endpoint.
+                    bindCredential = null;
+                    logger.debugf("Not reusing stored LDAP bindCredential for component %s because connection URL or bind DN differs.", config.getComponentId());
                 }
             }
         }
