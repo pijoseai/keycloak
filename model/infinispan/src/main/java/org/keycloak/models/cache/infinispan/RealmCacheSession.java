@@ -82,6 +82,8 @@ import org.keycloak.storage.DatastoreProvider;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.StoreManagers;
 import org.keycloak.storage.client.ClientStorageProviderModel;
+import org.keycloak.storage.group.GroupStorageProviderModel;
+import org.keycloak.storage.role.RoleStorageProviderModel;
 
 import org.jboss.logging.Logger;
 
@@ -932,31 +934,85 @@ public class RealmCacheSession implements CacheRealmProvider {
             return managedRoles.get(id);
         }
 
-        CachedRole cached = getCachedRole(realm, id);
-        if (cached == null) {
-            return null;
+        CachedRole cached = cache.get(id, CachedRole.class);
+        if (cached != null && !cached.getRealm().equals(realm.getId())) {
+            cached = null;
         }
-        RoleAdapter adapter = new RoleAdapter(cached,this, realm);
-        managedRoles.put(id, adapter);
+
+        RoleModel adapter;
+        if (cached != null) {
+            logger.tracev("role by id cache hit: {0}", cached.getName());
+            adapter = validateCachedRole(realm, cached);
+        } else {
+            long loaded = cache.getCurrentRevision(id);
+            RoleModel model = getRoleDelegate().getRoleById(realm, id);
+            if (model == null) return null;
+            if (invalidations.contains(id)) return model;
+            adapter = cacheRole(realm, model, loaded);
+        }
+        if (adapter == null) return null;
+        if (adapter instanceof RoleAdapter) {
+            managedRoles.put(id, (RoleAdapter) adapter);
+        }
         return adapter;
+    }
+
+    protected RoleModel cacheRole(RealmModel realm, RoleModel delegate, long revision) {
+        if (invalidations.contains(delegate.getId())) return delegate;
+        StorageId storageId = new StorageId(delegate.getId());
+        CachedRole cached;
+        if (!storageId.isLocal()) {
+            ComponentModel component = realm.getComponent(storageId.getProviderId());
+            if (component == null) return delegate;
+            RoleStorageProviderModel providerModel = new RoleStorageProviderModel(component);
+            if (!providerModel.isEnabled()) {
+                return delegate;
+            }
+            if (providerModel.getCachePolicy() == RoleStorageProviderModel.CachePolicy.NO_CACHE) {
+                return delegate;
+            }
+            if (delegate.isClientRole()) {
+                cached = new CachedClientRole(revision, delegate.getContainerId(), delegate, realm);
+            } else {
+                cached = new CachedRealmRole(revision, delegate, realm);
+            }
+            long lifespan = providerModel.getLifespan();
+            if (lifespan > 0) {
+                cache.addRevisioned(cached, startupRevision, lifespan);
+            } else {
+                cache.addRevisioned(cached, startupRevision);
+            }
+        } else {
+            if (delegate.isClientRole()) {
+                cached = new CachedClientRole(revision, delegate.getContainerId(), delegate, realm);
+            } else {
+                cached = new CachedRealmRole(revision, delegate, realm);
+            }
+            cache.addRevisioned(cached, startupRevision);
+        }
+        return new RoleAdapter(cached, this, realm);
+    }
+
+    protected RoleModel validateCachedRole(RealmModel realm, CachedRole cached) {
+        StorageId storageId = new StorageId(cached.getId());
+        if (!storageId.isLocal()) {
+            ComponentModel component = realm.getComponent(storageId.getProviderId());
+            if (component == null) {
+                return null;
+            }
+            RoleStorageProviderModel model = new RoleStorageProviderModel(component);
+            if (model.shouldInvalidate(cached)) {
+                invalidateRole(cached.getId());
+                return getRoleDelegate().getRoleById(realm, cached.getId());
+            }
+        }
+        return new RoleAdapter(cached, this, realm);
     }
 
     protected CachedRole getCachedRole(RealmModel realm, String id) {
         CachedRole cached = cache.get(id, CachedRole.class);
         if (cached != null && !cached.getRealm().equals(realm.getId())) {
             cached = null;
-        }
-
-        if (cached == null) {
-            long loaded = cache.getCurrentRevision(id);
-            RoleModel model = getRoleDelegate().getRoleById(realm, id);
-            if (model == null) return null;
-            if (model.isClientRole()) {
-                cached = new CachedClientRole(loaded, model.getContainerId(), model, realm);
-            } else {
-                cached = new CachedRealmRole(loaded, model, realm);
-            }
-            cache.addRevisioned(cached, startupRevision);
         }
         return cached;
     }
@@ -973,17 +1029,63 @@ public class RealmCacheSession implements CacheRealmProvider {
             GroupModel model = getGroupDelegate().getGroupById(realm, id);
             if (model == null) return null;
             if (invalidations.contains(id)) return model;
-            cached = new CachedGroup(loaded, realm, model);
-            cache.addRevisioned(cached, startupRevision);
-
+            StorageId storageId = new StorageId(id);
+            if (!storageId.isLocal()) {
+                ComponentModel component = realm.getComponent(storageId.getProviderId());
+                if (component == null) return model;
+                GroupStorageProviderModel providerModel = new GroupStorageProviderModel(component);
+                if (!providerModel.isEnabled()) {
+                    return model;
+                }
+                if (providerModel.getCachePolicy() == GroupStorageProviderModel.CachePolicy.NO_CACHE) {
+                    return model;
+                }
+                cached = new CachedGroup(loaded, realm, model);
+                long lifespan = providerModel.getLifespan();
+                if (lifespan > 0) {
+                    cache.addRevisioned(cached, startupRevision, lifespan);
+                } else {
+                    cache.addRevisioned(cached, startupRevision);
+                }
+            } else {
+                cached = new CachedGroup(loaded, realm, model);
+                cache.addRevisioned(cached, startupRevision);
+            }
         } else if (invalidations.contains(id)) {
             return getGroupDelegate().getGroupById(realm, id);
         } else if (managedGroups.containsKey(id)) {
             return managedGroups.get(id);
+        } else {
+            GroupModel validated = validateCachedGroup(realm, cached);
+            if (validated == null) {
+                return null;
+            }
+            if (!(validated instanceof GroupAdapter)) {
+                return validated;
+            }
+            GroupAdapter adapter = (GroupAdapter) validated;
+            managedGroups.put(id, adapter);
+            return adapter;
         }
         GroupAdapter adapter = new GroupAdapter(cached, this, session, realm);
         managedGroups.put(id, adapter);
         return adapter;
+    }
+
+    protected GroupModel validateCachedGroup(RealmModel realm, CachedGroup cached) {
+        StorageId storageId = new StorageId(cached.getId());
+        if (!storageId.isLocal()) {
+            ComponentModel component = realm.getComponent(storageId.getProviderId());
+            if (component == null) {
+                return null;
+            }
+            GroupStorageProviderModel model = new GroupStorageProviderModel(component);
+            if (model.shouldInvalidate(cached)) {
+                invalidateGroup(cached.getId(), realm.getId(), false);
+                return getGroupDelegate().getGroupById(realm, cached.getId());
+            }
+        }
+        return new GroupAdapter(cached, this, session, realm);
     }
 
     @Override
